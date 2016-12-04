@@ -6,24 +6,30 @@
 {-# LANGUAGE MultiParamTypeClasses    #-}
 {-# LANGUAGE OverloadedStrings    #-}
 {-# LANGUAGE RankNTypes    #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Lib where
 
+import Data.Bifunctor
+import Data.Bifunctor.TH
+import Data.Bifunctor.Wrapped
 import Data.Text (Text)
 import qualified Data.Text as T
 
-class Render f where
-  render :: (Render g) => f (Formula g) -> Text
+data Fix f = Fix { unFix :: f (Fix f) }
+type Formula f a = Fix (f a)
 
-pretty :: Render f => Formula f -> Text
+class Render f where
+  render :: (Show a, Render g) => f a (Formula g a) -> Text
+
+pretty :: (Show a, Render f) => Formula f a -> Text
 pretty (Fix x) = render x
 
-newtype AtomId = AtomId Int  deriving (Eq, Show)
 newtype VarId  = VarId Int   deriving (Eq, Show)
 
-data Propositional e = Atom AtomId | PTrue | PFalse | PAnd e e | POr e e | PNeg e
-  deriving (Functor, Foldable)
+data Propositional a e = Atom a | PTrue | PFalse | PAnd e e | POr e e | PNeg e
+$(deriveBifunctor ''Propositional)
 
 instance Render Propositional where
   render (Atom id) = T.pack $ show id
@@ -33,21 +39,21 @@ instance Render Propositional where
   render (POr  (Fix e1) (Fix e2)) = T.concat ["(", render e1, ") \\/ (", render e1, ")"]
   render (PNeg (Fix e)) = T.concat ["~(", render e, ")"]
 
-data Implications e = Impl e e | Iff e e
-  deriving (Functor, Foldable)
+data Implications a e = Impl e e | Iff e e
+$(deriveBifunctor ''Implications)
 
 instance Render Implications where
   render (Impl (Fix e1) (Fix e2)) = T.concat ["(", render e1, ") -> (", render e2, ")"]
   render (Iff  (Fix e1) (Fix e2)) = T.concat ["(", render e1, ") <-> (", render e2, ")"]
 
-data Quantifiers e = Forall VarId e | Exists VarId e
-  deriving (Functor, Foldable, Show)
+data Quantifiers a e = Forall VarId e | Exists VarId e
+$(deriveBifunctor ''Quantifiers)
 
-data Fix f = Fix { unFix :: f (Fix f) }
-type Formula f = Fix f
+data (:+:) f g a e = Inl (f a e) | Inr (g a e)
 
-data (:+:) f g x = Inl (f x) | Inr (g x)
-  deriving (Functor, Foldable, Show)
+instance (Bifunctor f, Bifunctor g) => Bifunctor (f :+: g) where
+  bimap f g (Inl fa) = Inl $ bimap f g fa
+  bimap f g (Inr ga) = Inr $ bimap f g ga
 
 instance (Render f, Render g) => Render (f :+: g) where
   render (Inl x) = render x
@@ -55,11 +61,12 @@ instance (Render f, Render g) => Render (f :+: g) where
 
 infixl 6 :+:
 
-class Functor f => ToProp f where
-  toProp' :: (ToProp f') => f (Fix f') -> Formula Propositional
+class Bifunctor f => ToProp f where
+  toProp' :: (ToProp g) => f a (Fix (g a)) -> Formula Propositional a
 
 instance ToProp Propositional where
-  toProp' = Fix . fmap (toProp' . unFix)
+  toProp' = Fix . unwrapBifunctor . fmap (toProp' . unFix) . WrapBifunctor
+  {-# NOINLINE toProp'#-}
 
 instance ToProp Implications where
   toProp' = Fix . \case
@@ -70,34 +77,36 @@ instance (ToProp f1, ToProp f2) => ToProp (f1 :+: f2) where
   toProp' (Inl e) = toProp' e
   toProp' (Inr e) = toProp' e
 
-toProp :: ToProp f => Formula f -> Formula Propositional
+toProp :: ToProp f => Formula f a -> Formula Propositional a
 toProp = toProp' . unFix
 
-class (Functor sub, Functor sup) => sub :<: sup where
-  inj :: sub a -> sup a
+class (Bifunctor sub, Bifunctor sup) => sub :<: sup where
+  inj :: sub a e -> sup a e
 
-instance {-# OVERLAPPABLE #-} (Functor f) => f :<: f where
+instance {-# OVERLAPPABLE #-} (Bifunctor f) => f :<: f where
   inj = id
 
-instance (Functor f, Functor g) => f :<: (f :+: g) where
+instance (Bifunctor f, Bifunctor g) => f :<: (f :+: g) where
   inj = Inl
 
-instance {-# OVERLAPPABLE #-} (Functor f, Functor g, Functor h, f :<: h) => f :<: (g :+: h) where
+instance {-# OVERLAPPABLE #-} (Bifunctor f, Bifunctor g, Bifunctor h, f :<: h) => f :<: (g :+: h) where
   inj = Inr . inj
 
-inject :: (g :<: f) => g (Formula f) -> Formula f
+inject :: (g :<: f) => g a (Formula f a) -> Formula f a
 inject = Fix . inj
 
-ptrue, pfalse :: Propositional :<: f => Formula f
+ptrue, pfalse :: (Propositional :<: f) => Formula f a
 ptrue  = inject PTrue
 pfalse = inject PFalse
 
-por, pand :: Propositional :<: f => Formula f -> Formula f -> Formula f
+por, pand :: (Propositional :<: f) => Formula f a -> Formula f a -> Formula f a
 por e1 e2 = inject (POr e1 e2)
 pand e1 e2 = inject (PAnd e1 e2)
 
 impl e1 e2 = inject (Impl e1 e2)
 
-formula1 :: Formula (Propositional :+: Implications)
+formula1 :: Formula (Propositional :+: Implications) Int
 formula1 = impl (por ptrue pfalse) (impl ptrue ptrue)
 
+-- instance (Bifunctor f) => Functor (Fix f) where
+--   fmap f (Fix x) = undefined
