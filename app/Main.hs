@@ -16,6 +16,9 @@ formula2 = pfalse
 formula3 :: Formula Propositional Int
 formula3 = (patom 1) `por` ptrue
 
+formula4 :: Formula (Propositional :+: Implication) String
+formula4 = (((patom "P") `impl` (patom "Q")) `impl` (patom "P")) `impl` (patom "P")
+
 main :: IO ()
 main =  do
   return ()
@@ -28,3 +31,5 @@ main =  do
   print $ tautology formula2
   print $ tautology formula3
   print $ satisfiable formula3
+  putStrLn $ truthTable $ toProp $ formula1
+  putStrLn $ truthTable $ toProp $ formula4

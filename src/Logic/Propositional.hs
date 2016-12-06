@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-pre-inlining #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -6,6 +7,7 @@ module Logic.Propositional ( patom
                            , ptrue, pfalse
                            , pand, por
                            , pneg
+                           , truthTable
                            , Propositional(..)
                            ) where
 
@@ -14,6 +16,9 @@ import Logic.Formula
 import Logic.Render
 
 import Data.Bifunctor.TH
+import Data.Maybe (fromJust)
+import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Data.Text as T
 
 data Propositional a e = Atom a | PTrue | PFalse | PAnd e e | POr e e | PNeg e
@@ -50,3 +55,22 @@ instance Eval Propositional where
   eval (PAnd (Fix e1) (Fix e2)) val = pure (&&) <*> eval e1 val <*> eval e2 val
   eval (POr  (Fix e1) (Fix e2)) val = pure (||) <*> eval e1 val <*> eval e2 val
   eval (PNeg (Fix e)) val = pure (not) <*> eval e val
+
+
+truthTable :: (Show a, Ord a) => Formula Propositional a -> T.Text
+truthTable fml = T.intercalate "\n" [ header
+                                    , sepLine
+                                    , T.intercalate "\n" tableLines
+                                    ]
+  where header        = T.concat [headerCols, "| formula"]
+        headerCols    = T.concat $ map (\atom -> T.concat [T.pack . show $ atom, "\t"]) $ orderedAtoms
+        orderedAtoms  = S.toAscList . atoms $ fml
+        len           = length orderedAtoms
+        vals          = valuations fml
+        valfs         = map (flip M.lookup) vals 
+        sepLine       = T.replicate (8 * len + 8) "="
+        tableLines    = map tableLine valfs
+        tableLine val = T.concat [ T.intercalate "\t" $ map (T.pack . show . fromJust . val) orderedAtoms
+                                 , "\t| "
+                                 , T.pack . show . fromJust $ evaluate fml val
+                                 ]
