@@ -1,13 +1,13 @@
 {-# LANGUAGE TypeOperators #-}
 module Main where
 
-import Lib
+import Logic
 
 import Prelude hiding (putStrLn)
 import Data.Foldable
 import Data.Text.IO (putStrLn)
 
-formula1 :: Formula (Propositional :+: Implications) Int
+formula1 :: Formula (Propositional :+: Implication) Int
 formula1 = impl (por ptrue pfalse) (impl ptrue (patom 2))
 
 formula2 :: Formula Propositional Int
